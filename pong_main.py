@@ -31,33 +31,42 @@ episodes = 100000
 player_id = 1
 opponent_id = 3 - player_id
 opponent = wimblepong.SimpleAi(env, opponent_id)
-player = Agent(env, player_id) #Agent(env, player_id) #introduce here our agent
+player = Agent(env, 1, player_id) #Agent(env, player_id) #introduce here our agent
 
 # Set the names for both SimpleAIs
 env.set_names(player.get_name(), opponent.get_name())
-
+matches =0
 win1 = 0
 for i in range(0,episodes):
+    if i%21==0:
+        print("-------Match",matches)
+        
+        matches +=1
     done = False
+    observation = env.reset()
+    observation = to_gray_scale_and_downsample(observation[0])
     while not done:
-        # Get the actions from both SimpleAIs
-        action1 = player.get_action() # our are all the 1 because we are the action 1 
+        action1 = player.get_action(observation) # our are all the 1 because we are the action 1 
         action2 = opponent.get_action()
         # Step the environment and get the rewards and new observations
         (ob1, ob2), (rew1, rew2), done, info = env.step((action1, action2))
         #convert to grayscale
         ob1_g_d =  to_gray_scale_and_downsample(ob1)
-        cv2.imshow('Original image',ob1)
-        cv2.imshow('Gray image', ob1_g_d)  
+        player.store_outcome(ob1_g_d, action1, rew1) 
         #img = Image.fromarray(ob1)
         #img.save("ob1.png")
         #img = Image.fromarray(ob2)
         #img.save("ob2.png")
         # Count the wins
+        if i%21==0:
+            win1 = 0
+        
         if rew1 == 10:
             win1 += 1
         if not args.headless:
             env.render()
         if done:
             observation= env.reset()
-            print("episode {} over. Broken WR: {:.3f}".format(i, win1/(i+1)))
+            print("episode {} over. Broken WR: {:.3f}".format(i%21, win1/(i%21+1)))
+    
+    player.update()
