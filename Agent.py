@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 import cv2
 import numpy as np
-
+import scipy.misc
 import matplotlib.pyplot as plt
 
 
@@ -25,8 +25,6 @@ class PolicyConv(torch.nn.Module):
 
         self.reshaped_size = 1568#128*11*11
 
-        self.h0 = []
-        self.c0 = []
         self.lstm = torch.nn.LSTM(self.reshaped_size, 256,num_layers=2)
 
         self.fc1_actor = torch.nn.Linear(256, self.hidden)
@@ -163,21 +161,33 @@ class Agent(object):
         self.prev_obs_t_2 = None
     
     def preprocess(self, observation):
+
+        #resized = scipy.misc.imresize(y, [80,80])
+     
+
         observation = np.array(observation)
         observation = observation[::2, ::2].mean(axis=-1)
-        observation = np.expand_dims(observation, axis=-1)
+        # low pass and high pass for the image
+        observation[observation <50 ] = 0.0
+        observation[observation >50 ] = 255.0
         
         if self.prev_obs_t_1 is None:
-            self.prev_obs_t_1 = observation
-            self.prev_obs_t_2 = observation
+            self.prev_obs_t_1 = np.zeros([100,100])
+            self.prev_obs_t_2 = np.zeros([100,100])
 
+        stack_ob =  observation + self.prev_obs_t_2 + self.prev_obs_t_1  #np.concatenate((self.prev_obs_t_1,self.prev_obs_t_2, observation), axis=-1) #  observation - self.prev_obs_t_2#
         
-        stack_ob =  observation - self.prev_obs_t_2 # np.concatenate((self.prev_obs_t_1,self.prev_obs_t_2, observation), axis=-1) #  observation - self.prev_obs_t_2#
         stack_ob = torch.from_numpy(stack_ob).float().unsqueeze(0)
-        
+        stack_ob = stack_ob.reshape(1,100 ,100,1)
         stack_ob = stack_ob.transpose(1, 3)
-        self.prev_obs_t_1 = self.prev_obs_t_2
-        self.prev_obs_t_2 = observation 
+        #plt.imshow(stack_ob, cmap='gray')
+        #plt.show()
+        self.prev_obs_t_1 = self.prev_obs_t_2 
+        # removing the bar 
+        observation[:,0:8] = 0.0
+        observation[:,90:99] = 0.0 
+        self.prev_obs_t_2 = observation* 0.8
+         
 
         return stack_ob #torch.from_numpy(stack_ob).float().unsqueeze(0) #torch.from_numpy(x).float().unsqueeze(0)
     
