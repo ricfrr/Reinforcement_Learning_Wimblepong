@@ -15,19 +15,22 @@ class PolicyConv(torch.nn.Module):
         super().__init__()
         self.action_space = action_space
         self.hidden = hidden
-        self.conv1 = torch.nn.Conv2d(2, 32, 3, 2)
-        self.conv1_bn = nn.BatchNorm2d(32)
-        self.conv2 = torch.nn.Conv2d(32, 64, 3, 2)
-        self.conv2_bn = nn.BatchNorm2d(64)
-        self.conv3 = torch.nn.Conv2d(64, 128, 3, 2)
-        self.conv3_bn = nn.BatchNorm2d(128)
+        self.conv1 = torch.nn.Conv2d(1, 32, 3,stride=2, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
+        #self.conv2 = torch.nn.Conv2d(32, 64, 9, 2)
+        #self.conv3 = torch.nn.Conv2d(64, 128, 9, 2)
         
 
-        self.reshaped_size = 128*11*11
-        self.fc1_actor = torch.nn.Linear(self.reshaped_size, self.hidden)
-        self.fc1_actor_bn = nn.BatchNorm1d(self.hidden)
-        self.fc1_critic = torch.nn.Linear(self.reshaped_size, self.hidden)
-        self.fc1_critic_bn = nn.BatchNorm1d(self.hidden)
+        self.reshaped_size = 1568#128*11*11
+
+        self.h0 = []
+        self.c0 = []
+        self.lstm = torch.nn.LSTM(self.reshaped_size, 256,num_layers=2)
+
+        self.fc1_actor = torch.nn.Linear(256, self.hidden)
+        self.fc1_critic = torch.nn.Linear(256, self.hidden)
         
         self.fc2_mean = torch.nn.Linear(self.hidden, action_space)
         
@@ -38,45 +41,45 @@ class PolicyConv(torch.nn.Module):
         torch.nn.init.xavier_uniform_(self.conv1.weight)
         torch.nn.init.xavier_uniform_(self.conv2.weight)
         torch.nn.init.xavier_uniform_(self.conv3.weight)
+        torch.nn.init.xavier_uniform_(self.conv4.weight)
         torch.nn.init.xavier_uniform_(self.fc1_actor.weight)
         torch.nn.init.xavier_uniform_(self.fc1_critic.weight)
         torch.nn.init.xavier_uniform_(self.fc2_mean.weight)
         torch.nn.init.xavier_uniform_(self.fc2_value.weight)
-
+       
 
     def forward(self, x):
         x = self.conv1(x)
         x = F.relu(x)
-        x = self.conv1_bn(x)
-        x = F.relu(x)
+        
         x = self.conv2(x)
-        x = F.relu(x)
-        x = self.conv2_bn(x)
         x = F.relu(x)
 
         x = self.conv3(x)
         x = F.relu(x)
-        x = self.conv3_bn(x)
+        
+        x = self.conv4(x)
+        x = F.relu(x)
 
         x = F.relu(x)
 
-        x = x.reshape(-1, self.reshaped_size)
+        x = x.reshape(-1, 1,self.reshaped_size )
+       
+        x, _ = self.lstm(x)
         x_ac = self.fc1_actor(x)
         x_ac = F.relu(x_ac)
-        x_ac = self.fc1_actor_bn(x_ac)
         
-        x_ac = F.relu(x_ac)
 
         x_mean = self.fc2_mean(x_ac)
 
         x_probs = F.softmax(x_mean, dim=-1)
+        #print(x_probs)
+        
         dist = Categorical(x_probs)
 
         x_cr = self.fc1_critic(x)
         x_cr = F.relu(x_cr)
-        x_cr = self.fc1_critic_bn(x_cr)
-        x_cr = F.relu(x_cr)
-
+    
         value = self.fc2_value(x_cr)
 
         return dist, value
@@ -92,20 +95,21 @@ class Agent(object):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-        self.policy = PolicyConv(3, 128).to(self.device)
+        self.policy = PolicyConv(3, 400).to(self.device)
+        self.policy.to(self.device)
         #second targt net 
-        self.target_net = PolicyConv(3, 128).to(self.device)
-        self.target_net.load_state_dict(self.policy.state_dict())
-        self.target_net.eval()
-
-        self.prev_obs = None
+        #self.target_net = PolicyConv(3, 200).to(self.device)
+        #self.target_net.load_state_dict(self.policy.state_dict())
+        
+        self.prev_obs_t_1 = None
+        self.prev_obs_t_2 = None
 
         #self.optimizer = optim.Adam(shared_model.parameters(), lr=args.lr)
         self.player_id = player_id  
         self.name = "Bro"
        
-        self.optimizer = torch.optim.RMSprop(self.policy.parameters(), lr=5e-3)
-        self.gamma = 0.98
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=1e-4)
+        self.gamma = 0.99
         
         self.states = []
         self.action_probs = []
@@ -113,40 +117,38 @@ class Agent(object):
         self.values = [] # values saved during the training 
 
     def update(self):
+        
+        self.optimizer.zero_grad()
         action_probs = torch.stack(self.action_probs, dim=0).to(self.device).squeeze(-1)
         rewards = torch.stack(self.rewards, dim=0).to(self.device).squeeze(-1)
         values = torch.stack(self.values, dim=0).to(self.device).squeeze(-1) # values from the network
         self.states, self.action_probs, self.rewards, self.values = [], [], [], []
 
-        
         discounted_rewards = self.discount_rewards(rewards,self.gamma)
         
         advantage =  discounted_rewards - values 
         advantage -= torch.mean(advantage)
-        advantage /= torch.std(advantage.detach())
+        std = torch.std(advantage.detach()) if torch.std(advantage.detach()) >0 else 1
+        advantage /=std
 
-        action_probs = action_probs.view(action_probs.shape[0],action_probs.shape[2] ).T
-        weighted_probs = -action_probs[0]* advantage.detach()
+        weighted_probs = -action_probs*   advantage.detach()  
         
 
         actor_loss = weighted_probs.mean()
         critic_loss = advantage.pow(2).mean()
         ac_loss = actor_loss + critic_loss 
         
-        
         ac_loss.backward()
-
-    
+        
         self.optimizer.step()
-        self.optimizer.zero_grad()
 
     def get_action(self, observation):
         x = self.preprocess(observation).to(self.device)
-        dist, value = self.target_net.forward(x)
-        #dist, value = self.policy.forward(x)
-        action = torch.argmax(dist.probs)
+        dist, value = self.policy.forward(x)
+        action = dist.sample()
+        #print(action)
         self.values.append(value)
-        self.action_probs.append(dist.probs)
+        self.action_probs.append( dist.log_prob(action))
         return action
 
     def get_name(self):
@@ -157,23 +159,30 @@ class Agent(object):
         self.rewards.append(torch.Tensor([reward]))
 
     def reset(self):
-        self.prev_obs = None
+        self.prev_obs_t_1 = None
+        self.prev_obs_t_2 = None
     
     def preprocess(self, observation):
-        observation = np.array(observation[0])
+        observation = np.array(observation)
         observation = observation[::2, ::2].mean(axis=-1)
-
         observation = np.expand_dims(observation, axis=-1)
-        if self.prev_obs is None:
-            self.prev_obs = observation
-        stack_ob = np.concatenate((self.prev_obs, observation), axis=-1)
+        
+        if self.prev_obs_t_1 is None:
+            self.prev_obs_t_1 = observation
+            self.prev_obs_t_2 = observation
+
+        
+        stack_ob =  observation - self.prev_obs_t_2 # np.concatenate((self.prev_obs_t_1,self.prev_obs_t_2, observation), axis=-1) #  observation - self.prev_obs_t_2#
         stack_ob = torch.from_numpy(stack_ob).float().unsqueeze(0)
+        
         stack_ob = stack_ob.transpose(1, 3)
-        self.prev_obs = observation
-        return stack_ob
+        self.prev_obs_t_1 = self.prev_obs_t_2
+        self.prev_obs_t_2 = observation 
+
+        return stack_ob #torch.from_numpy(stack_ob).float().unsqueeze(0) #torch.from_numpy(x).float().unsqueeze(0)
     
     def load_model(self):
-        weights = torch.load("model.mdl")
+        weights = torch.load("weights_bro_7700.mdl",map_location=torch.device('cpu'))
         self.policy.load_state_dict(weights, strict=False)
 
     def discount_rewards(self,r, gamma):
@@ -185,6 +194,6 @@ class Agent(object):
         return discounted_r
 
     def update_target_network(self):
-        self.target_net.load_state_dict(self.policy.state_dict())
+        self.policy.load_state_dict(self.policy.state_dict())
 
 

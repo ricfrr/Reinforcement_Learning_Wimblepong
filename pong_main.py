@@ -41,26 +41,32 @@ points_2 = 0
 point_history1 = []
 point_history2 = []
 timesteps_history = []
+reward_history = []
 
 for i in range(0,episodes):
 
-    observation = env.reset()
+    obs1, obs2 = env.reset()
     #match loop
     match_done = False
     timesteps_list = []
+    reward_list = []
+    points=0
     while not match_done:
         done = False
         #point loop
         timesteps = 0
+        rew_store =0
         while not done:
             timesteps += 1
-            action1 = player.get_action(observation) # our are all the 1 because we are the action 1 
+            action1 = player.get_action(obs1) # our are all the 1 because we are the action 1 
             action2 = opponent.get_action()
             # Step the environment and get the rewards and new observations
-            (ob1, ob2), (rew1, rew2), done, info = env.step((action1, action2))
-
-            player.store_outcome(ob1, action1, rew1) 
-
+            (obs1, obs2), (rew1, rew2), done, info = env.step((action1, action2))
+            if rew1 == 0:
+                rew1=0.1 #0.1
+            player.store_outcome(obs1, action1, rew1) 
+            observation = (obs1, obs2)
+            rew_store += rew1
             if not args.headless:
                 env.render()
             if done:
@@ -69,23 +75,29 @@ for i in range(0,episodes):
                 else:
                     points_2 += 1
                 observation= env.reset()
-
-        timesteps_list.append(timesteps)
         player.update()
+        timesteps_list.append(timesteps)
+        reward_list.append(rew_store)
+        #player.update_target_network()
+
         if points_1 >= 21 or points_2 >=21:
             match_done = True
-    print("episode " , i ," over. result = Bro : ",points_1, " AI : ",points_2, " avg_timesteps : ", np.array(timesteps_list).mean())
+        points +=1
+    print("episode " , i ," over. result = Bro : ",points_1, " AI : ",points_2, " avg_timesteps : ", np.array(timesteps_list).mean(), " avg_rew :", np.array(reward_list).mean())
     point_history1.append(int(points_1))
     point_history2.append(int(points_2))
     timesteps_history.append(np.array(timesteps_list).mean())
+    reward_history.append(np.array(reward_list).mean())
     
     points_1 =0
-    points_2 =0          
+    points_2 =0 
+                 
     if i %100 ==0:
         torch.save(player.policy.state_dict(),"weights_%s_%d.mdl" % ("bro", i)) 
         # saving point made by bro
         np.savetxt('point_history_1.txt', np.array(point_history1), delimiter=',')
         np.savetxt('point_history_2.txt', np.array(point_history2), delimiter=',')
         np.savetxt('timestep_history.txt', np.array(timesteps_history), delimiter=',')
-    
-    player.update_target_network()
+        np.savetxt('reward_history.txt', np.array(reward_history), delimiter=',')
+    #if i%20==0:
+    #    player.update_target_network()
