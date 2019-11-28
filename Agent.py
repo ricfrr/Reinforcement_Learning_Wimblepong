@@ -19,16 +19,13 @@ class PolicyConv(torch.nn.Module):
         self.conv2 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
         self.conv3 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
         self.conv4 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
-        #self.conv2 = torch.nn.Conv2d(32, 64, 9, 2)
-        #self.conv3 = torch.nn.Conv2d(64, 128, 9, 2)
         
 
         self.reshaped_size = 1568#128*11*11
 
-        self.lstm = torch.nn.LSTM(self.reshaped_size, 256,num_layers=2)
 
-        self.fc1_actor = torch.nn.Linear(256, self.hidden)
-        self.fc1_critic = torch.nn.Linear(256, self.hidden)
+        self.fc1_actor = torch.nn.Linear(self.reshaped_size, self.hidden)
+        self.fc1_critic = torch.nn.Linear(self.reshaped_size, self.hidden)
         
         self.fc2_mean = torch.nn.Linear(self.hidden, action_space)
         
@@ -63,7 +60,6 @@ class PolicyConv(torch.nn.Module):
 
         x = x.reshape(-1, 1,self.reshaped_size )
        
-        x, _ = self.lstm(x)
         x_ac = self.fc1_actor(x)
         x_ac = F.relu(x_ac)
         
@@ -71,7 +67,6 @@ class PolicyConv(torch.nn.Module):
         x_mean = self.fc2_mean(x_ac)
 
         x_probs = F.softmax(x_mean, dim=-1)
-        #print(x_probs)
         
         dist = Categorical(x_probs)
 
@@ -87,8 +82,8 @@ class PolicyConv(torch.nn.Module):
 class Agent(object):
     def __init__(self, env, num_inputs, player_id=1):
     
-        if type(env) is not Wimblepong:
-            raise TypeError("I'm not a very smart AI. All I can play is Wimblepong.")
+        #if type(env) is not Wimblepong:
+        #    raise TypeError("I'm not a very smart AI. All I can play is Wimblepong.")
         self.env = env
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -96,8 +91,9 @@ class Agent(object):
         self.policy = PolicyConv(3, 400).to(self.device)
         self.policy.to(self.device)
         #second targt net 
-        #self.target_net = PolicyConv(3, 200).to(self.device)
+        #self.target_net = PolicyConv(3, 400).to(self.device)
         #self.target_net.load_state_dict(self.policy.state_dict())
+        #self.target_net.to(self.device)
         
         self.prev_obs_t_1 = None
         self.prev_obs_t_2 = None
@@ -113,10 +109,12 @@ class Agent(object):
         self.action_probs = []
         self.rewards = []
         self.values = [] # values saved during the training 
+        self.batch_size = 10
+        self.ep_number  = 0
 
     def update(self):
         
-        self.optimizer.zero_grad()
+        
         action_probs = torch.stack(self.action_probs, dim=0).to(self.device).squeeze(-1)
         rewards = torch.stack(self.rewards, dim=0).to(self.device).squeeze(-1)
         values = torch.stack(self.values, dim=0).to(self.device).squeeze(-1) # values from the network
@@ -137,8 +135,10 @@ class Agent(object):
         ac_loss = actor_loss + critic_loss 
         
         ac_loss.backward()
-        
-        self.optimizer.step()
+        self.ep_number +=1
+        if self.ep_number % self.batch_size == 0:
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
     def get_action(self, observation):
         x = self.preprocess(observation).to(self.device)
@@ -192,7 +192,7 @@ class Agent(object):
         return stack_ob #torch.from_numpy(stack_ob).float().unsqueeze(0) #torch.from_numpy(x).float().unsqueeze(0)
     
     def load_model(self):
-        weights = torch.load("weights_bro_7700.mdl",map_location=torch.device('cpu'))
+        weights = torch.load("weights_bro_9800.mdl",map_location=torch.device('cpu'))
         self.policy.load_state_dict(weights, strict=False)
 
     def discount_rewards(self,r, gamma):

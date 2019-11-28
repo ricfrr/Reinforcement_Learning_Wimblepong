@@ -62,8 +62,8 @@ for i in range(0,episodes):
             action2 = opponent.get_action()
             # Step the environment and get the rewards and new observations
             (obs1, obs2), (rew1, rew2), done, info = env.step((action1, action2))
-            if rew1 == 0:
-                rew1=0.1 #0.1
+
+
             player.store_outcome(obs1, action1, rew1) 
             observation = (obs1, obs2)
             rew_store += rew1
@@ -83,6 +83,8 @@ for i in range(0,episodes):
         if points_1 >= 21 or points_2 >=21:
             match_done = True
         points +=1
+    #player.update_target_network()
+
     print("episode " , i ," over. result = Bro : ",points_1, " AI : ",points_2, " avg_timesteps : ", np.array(timesteps_list).mean(), " avg_rew :", np.array(reward_list).mean())
     point_history1.append(int(points_1))
     point_history2.append(int(points_2))
@@ -99,5 +101,5 @@ for i in range(0,episodes):
         np.savetxt('point_history_2.txt', np.array(point_history2), delimiter=',')
         np.savetxt('timestep_history.txt', np.array(timesteps_history), delimiter=',')
         np.savetxt('reward_history.txt', np.array(reward_history), delimiter=',')
-    #if i%20==0:
+    #if i%10==0:
     #    player.update_target_network()
