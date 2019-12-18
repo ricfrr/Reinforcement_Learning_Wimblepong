@@ -4,7 +4,7 @@ import os
 from pong_testbench import PongTestbench
 from matplotlib import font_manager
 import importlib
-from  Agent import Agent
+import agent
 import wimblepong
 import gym
 
@@ -22,7 +22,7 @@ sys.path.insert(0, args.dir1)
 orig_wd = os.getcwd()
 os.chdir(args.dir1)
 env = gym.make("WimblepongVisualMultiplayer-v0")
-agent1 = Agent(env,1, 1)
+agent1 = agent.Agent()
 agent1.load_model()
 os.chdir(orig_wd)
 del sys.path[0]
